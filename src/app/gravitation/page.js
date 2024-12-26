@@ -1695,7 +1695,7 @@ export default function GravitationPage() {
     </Stack>
   } else if (controlState.mode === "velocity") {
     helpItems.push("left-click and drag: set velocity");
-    helpItems.push(<span>right-click, drag to another ball and release: for the two balls, a rotation velocity is calculated and <strong>added to their original velocity</strong></span>);
+    helpItems.push(<span>right-click, drag to another ball and release: a rotation velocity is set to the two balls</span>);
     subcontrolsPanel = <Stack direction="column" spacing={1}>
       <CButton
         variant="outlined"
