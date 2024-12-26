@@ -25,6 +25,18 @@ class Vector {
   static div(a, k) {
     return { x: a.x / k, y: a.y / k };
   }
+  static length(a) {
+    return hypot(a.x, a.y);
+  }
+  static normalize(a) {
+    const l = hypot(a.x, a.y);
+    return { x: a.x / l, y: a.y / l };
+  }
+  static rotate(a, angle) {
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    return { x: a.x * cos - a.y * sin, y: a.x * sin + a.y * cos };
+  }
 }
 
 function collision(m1, vx1, vy1, m2, vx2, vy2, dx, dy) {
@@ -93,7 +105,7 @@ function BulletinText({ children, width="15rem", ...props }) {
   </Box>
 }
 
-function AlignedNumberInput(label, value, onChange, unit=null, width="5rem", readonly=false, ...props) {
+function AlignedNumberInput(label, value, onChange, unit=null, width="5rem", readonly=false, props={}) {
   return <FormControl fullWidth variant="standard" size="small">
     <InputLabel htmlFor="number-input"
     >{label}</InputLabel>
@@ -181,6 +193,9 @@ export default function GravitationPage() {
     guiHidden: false,
     traceTicks: "500",
     traceType: "selected", // none, selected, all
+    drawVectorType: "none", // none, velocity, force, acceleration
+    drawVectorSubjects: "selected", // selected, all
+    drawVectorUnit: 100,
   })
   const [renderInterval, setRenderInterval] = useState(null)
   const [balls, setBalls] = useState([])
@@ -277,10 +292,41 @@ export default function GravitationPage() {
     }
   }
 
+  function calculateForceBetween(subject, object, G) {
+    const dx = object.center.x - subject.center.x;
+    const dy = object.center.y - subject.center.y;
+    const distance = hypot(dx, dy) + 1e-6; // avoid division by zero
+    let forceBottom = distance ** 2;
+    if (controlState.gravitationFormula === "inverseLinear") {
+      forceBottom = distance;
+    } else if (controlState.gravitationFormula === "inverseCube") {
+      forceBottom = distance ** 3;
+    }
+    const forceMagnitude = G * subject.mass * object.mass / forceBottom;
+    const forceX = forceMagnitude * dx / distance;
+    const forceY = forceMagnitude * dy / distance;
+    return { x: forceX, y: forceY };
+  }
+
+  function calculateForce(targetBall, balls, skipIndex) {
+    let force = { x: 0, y: 0 };
+    const controlState = timedEventHelper.current.controlState;
+    const G = parseFloat(controlState.gravitationalConstant);
+    if (isNaN(G)) { return force; }
+    balls.forEach((otherBall, otherIndex) => {
+      if (skipIndex === otherIndex) { return; }
+      const forceBetween = calculateForceBetween(targetBall, otherBall, G);
+      force.x += forceBetween.x;
+      force.y += forceBetween.y;
+    })
+    return force;
+  }
+
   function redraw() {
     if (timedEventHelper.current === null) { return; }
     const { canvasRef, controlState, balls, dragInfo, clientSize, highlightedBallIndex, selectedBallIndex, centeredBallIndex } = timedEventHelper.current;
     if (canvasRef.current === null) { return; }
+    const mode = controlState.mode;
 
     // create an offscreen canvas
     const offscreenCanvas = new OffscreenCanvas(clientSize.width, clientSize.height);
@@ -308,6 +354,32 @@ export default function GravitationPage() {
       offscreenContext.lineWidth = width;
       offscreenContext.stroke();
     };
+    const drawArrow = (start, end, color, width = 4, head = 8) => {
+      const displacement = Vector.sub(end, start);
+      const length = Vector.length(displacement);
+      if (length < head) { return; }
+      const dy = Vector.normalize(Vector.sub(end, start));
+      const dx = Vector.rotate(dy, Math.PI / 2);
+      const p0 = Vector.add(start, Vector.mul(dx, width / 2));
+      const p6 = Vector.add(start, Vector.mul(dx, -width / 2));
+      const p1 = Vector.add(p0, Vector.mul(dy, length - head * 2 / 3));
+      const p5 = Vector.add(p6, Vector.mul(dy, length - head * 2 / 3));
+      const p2 = Vector.add(Vector.add(p1, Vector.mul(dx, width)), Vector.mul(dy, -head / 3));
+      const p4 = Vector.add(Vector.add(p5, Vector.mul(dx, -width)), Vector.mul(dy, -head / 3));
+      const p3 = end;
+      offscreenContext.moveTo(p0.x, p0.y);
+      offscreenContext.beginPath();
+      offscreenContext.lineTo(p1.x, p1.y);
+      offscreenContext.lineTo(p2.x, p2.y);
+      offscreenContext.lineTo(p3.x, p3.y);
+      offscreenContext.lineTo(p4.x, p4.y);
+      offscreenContext.lineTo(p5.x, p5.y);
+      offscreenContext.lineTo(p6.x, p6.y);
+      offscreenContext.lineTo(p0.x, p0.y);
+      // fill
+      offscreenContext.fillStyle = color;
+      offscreenContext.fill();
+    }
 
     // draw background grid
     {
@@ -381,14 +453,14 @@ export default function GravitationPage() {
       let borderWidth = 1;
       let color = ball.color;
       let radius = ball.radius;
-      if (controlState.mode === "create" && !dragInfo.isDragging && highlightedBallIndex === index) {
+      if (mode === "create" && !dragInfo.isDragging && highlightedBallIndex === index) {
         borderColor = "red";
         borderWidth = 2;
         color = color.clone(); color.a = 0.5;
-      } else if ((controlState.mode === "play" || controlState.mode === "pause") && selectedBallIndex === index) {
+      } else if ((mode === "play" || mode === "pause" || mode === "velocity") && selectedBallIndex === index) {
         borderColor = "white";
         borderWidth = 5;
-      } else if (controlState.mode === "edit" && selectedBallIndex === index) {
+      } else if (mode === "edit" && selectedBallIndex === index) {
         borderColor = "white";
         borderWidth = 5;
         if (dragInfo.isDragging) {
@@ -403,7 +475,7 @@ export default function GravitationPage() {
             radius = hypot(worldDragEnd.x - ball.center.x, worldDragEnd.y - ball.center.y);
           }
         }
-      }  else if ((controlState.mode === "play" || controlState.mode === "pause" || controlState.mode === "edit") && highlightedBallIndex === index) {
+      } else if ((mode === "play" || mode === "pause" || mode === "edit" || mode == "velocity") && highlightedBallIndex === index) {
         borderColor = "white";
         borderWidth = 2;
       } 
@@ -415,6 +487,30 @@ export default function GravitationPage() {
         const d2 = { x: Math.SQRT2 / 2, y: Math.SQRT2 / 2 };
         drawLine(Vector.add(screenCenter, Vector.mul(d1, crossSize)), Vector.add(screenCenter, Vector.mul(d1, -crossSize)), "black", 6);
         drawLine(Vector.add(screenCenter, Vector.mul(d2, crossSize)), Vector.add(screenCenter, Vector.mul(d2, -crossSize)), "black", 6);
+      }
+      if (
+        ((mode === "play" || mode === "pause") && controlState.drawVectorType !== "none") ||
+        (mode === "velocity")
+      ) {
+        const drawVectorType = mode === "velocity" ? "velocity" : controlState.drawVectorType;
+        const drawThisBall = mode === "velocity" || (controlState.drawVectorSubjects === "all" || (controlState.drawVectorSubjects === "selected" && (selectedBallIndex === index || highlightedBallIndex === index)));
+        if (drawThisBall) {
+          let physicsVector = { x: 0, y: 0 };
+          if (drawVectorType === "velocity") {
+            physicsVector = ball.velocity;
+          } else if (drawVectorType === "force") {
+            physicsVector = calculateForce(ball, balls, index);
+          } else if (drawVectorType === "acceleration") {
+            physicsVector = Vector.div(calculateForce(ball, balls, index), ball.mass);
+          }
+          let screenVector = Vector.mul(physicsVector, controlState.drawVectorUnit);
+          screenVector.y = -screenVector.y;
+          let color = ball.color.clone();
+          let hsv = color.toHSV();
+          hsv.s = 0.5; hsv.v = 0.9;
+          color = Color.fromHSV(hsv.h, hsv.s, hsv.v);
+          drawArrow(screenCenter, Vector.add(screenCenter, screenVector), color.toString(), 4, 18);
+        }
       }
     })
     
@@ -484,9 +580,9 @@ export default function GravitationPage() {
       height: window.innerHeight
     })
     // prevent context menu for right click for canvas
-    // window.addEventListener("contextmenu", (e) => {
-    //   e.preventDefault();
-    // })
+    window.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+    })
   }, [])
 
   useEffect(() => {
@@ -527,30 +623,6 @@ export default function GravitationPage() {
     }
   }
 
-  function calculateForce(targetBall, balls, skipIndex) {
-    let force = { x: 0, y: 0 };
-    const controlState = timedEventHelper.current.controlState;
-    const G = parseFloat(controlState.gravitationalConstant);
-    if (isNaN(G)) { return force; }
-    balls.forEach((otherBall, otherIndex) => {
-      if (skipIndex === otherIndex) { return; }
-      const dx = otherBall.center.x - targetBall.center.x;
-      const dy = otherBall.center.y - targetBall.center.y;
-      const distance = hypot(dx, dy) + 1e-6; // avoid division by zero
-      let forceBottom = distance ** 2;
-      if (controlState.gravitationFormula === "inverseLinear") {
-        forceBottom = distance;
-      } else if (controlState.gravitationFormula === "inverseCube") {
-        forceBottom = distance ** 3;
-      }
-      const forceMagnitude = G * targetBall.mass * otherBall.mass / forceBottom;
-      const forceX = forceMagnitude * dx / distance;
-      const forceY = forceMagnitude * dy / distance;
-      force.x += forceX;
-      force.y += forceY;
-    })
-    return force;
-  }
 
   function tickTime(totalTime, splitCount) {
     let { canvasRef, controlState, balls, dragInfo, clientSize, highlightedBallIndex, selectedBallIndex, centeredBallIndex } = timedEventHelper.current;
@@ -676,6 +748,49 @@ export default function GravitationPage() {
     setBalls(balls);
     
   }
+
+  function setRotateAround(indexA, indexB) {
+    if (indexA === null || indexB === null || indexA === indexB) { return; }
+    if (balls[indexA].pinned && balls[indexB].pinned) { return; }
+    const controlState = timedEventHelper.current.controlState;
+    const G = parseFloat(controlState.gravitationalConstant);
+    if (isNaN(G)) { return; }
+    let force = calculateForceBetween(balls[indexA], balls[indexB], G);
+    // circular motion v^2 / r * m = F
+    let displacement = Vector.sub(balls[indexA].center, balls[indexB].center);
+    let distance = Vector.length(displacement);
+    let direction = Vector.normalize(displacement);
+    let tangent = Vector.rotate(direction, Math.PI / 2);
+    const bA = balls[indexA];
+    const bB = balls[indexB];
+    if (bA.pinned) {
+      // only set the velocity of bB
+      const vm = Math.sqrt(Vector.length(force) * distance / bB.mass);
+      const v = Vector.mul(tangent, vm);
+      setBalls(balls.map((ball, index) => { if (index === indexB) { return { ...ball, velocity: v }; } return ball; }))
+    } else if (bB.pinned) {
+      // only set the velocity of bA
+      const vm = Math.sqrt(Vector.length(force) * distance / bA.mass);
+      const v = Vector.mul(tangent, -vm);
+      setBalls(balls.map((ball, index) => { if (index === indexA) { return { ...ball, velocity: v }; } return ball; }))
+    } else {
+      // both rotate aroudn their center of mass
+      const center = Vector.div(Vector.add(Vector.mul(bA.center, bA.mass), Vector.mul(bB.center, bB.mass)), bA.mass + bB.mass);
+      const displacementA = Vector.sub(bA.center, center);
+      const displacementB = Vector.sub(bB.center, center);
+      const distanceA = Vector.length(displacementA);
+      const distanceB = Vector.length(displacementB);
+      const vmA = Math.sqrt(Vector.length(force) * distanceA / bA.mass);
+      const vmB = Math.sqrt(Vector.length(force) * distanceB / bB.mass);
+      const vA = Vector.mul(tangent, -vmA);
+      const vB = Vector.mul(tangent, vmB);
+      setBalls(balls.map((ball, index) => {
+        if (index === indexA) { return { ...ball, velocity: vA }; }
+        if (index === indexB) { return { ...ball, velocity: vB }; }
+        return ball;
+      }))
+    }
+  }
   
   useEffect(() => {
     const fps = 30;
@@ -725,7 +840,7 @@ export default function GravitationPage() {
         setSelectedBallIndex(foundIndex);
         if (foundIndex !== null) {setTemporaryValueOnEdit(balls[foundIndex]);}
       }
-    } else if (mode === "play" || controlState.mode === "pause") {
+    } else if (mode === "play" || controlState.mode === "pause" || mode === "velocity") {
       const foundIndex = findBallAtScreen({ x: e.clientX, y: e.clientY });
       if (foundIndex !== selectedBallIndex) {
         setSelectedBallIndex(foundIndex);
@@ -734,16 +849,11 @@ export default function GravitationPage() {
   }
 
   function canvasMouseMove(e) {
-    if (!dragInfo.isDragging) {
+    const mode = controlState.mode;
+    if (!dragInfo.isDragging || (mode === "velocity" && dragInfo.mouseKey === 2 && selectedBallIndex !== null)) {
       // update highlighted
       const screenCenter = { x: e.clientX, y: e.clientY };
-      const worldCenter = screenToWorld(screenCenter);
-      let newHighlightedBallIndex = null;
-      balls.forEach((ball, index) => {
-        if (hypot(ball.center.x - worldCenter.x, ball.center.y - worldCenter.y) < ball.radius) {
-          newHighlightedBallIndex = index;
-        }
-      })
+      let newHighlightedBallIndex = findBallAtScreen(screenCenter);
       if (newHighlightedBallIndex !== highlightedBallIndex) {
         setHighlightedBallIndex(newHighlightedBallIndex);
       }
@@ -753,6 +863,23 @@ export default function GravitationPage() {
         ...dragInfo,
         dragEnd: { x: e.clientX, y: e.clientY }
       })
+      if (mode === "velocity" && dragInfo.mouseKey === 0 && selectedBallIndex !== null && balls[selectedBallIndex].pinned === false) {
+        // update velocity of the selected ball
+        const selectedBall = balls[selectedBallIndex];
+        const screenDx = dragInfo.dragEnd.x - worldToScreen(selectedBall.center).x;
+        const screenDy = dragInfo.dragEnd.y - worldToScreen(selectedBall.center).y;
+        const physicsDx = screenDx / controlState.drawVectorUnit;
+        const physicsDy = -screenDy / controlState.drawVectorUnit;
+        setBalls(balls.map((ball, index) => {
+          if (index === selectedBallIndex) {
+            return {
+              ...ball,
+              velocity: { x: physicsDx, y: physicsDy },
+            }
+          }
+          return ball;
+        }))
+      }
     }
   }
 
@@ -817,6 +944,12 @@ export default function GravitationPage() {
           }
           return ball;
         }))
+      }
+    } else if (mode === "velocity" && dragInfo.isDragging && dragInfo.mouseKey === 2 && selectedBallIndex !== null && highlightedBallIndex !== null) {
+      let idA = selectedBallIndex;
+      let idB = highlightedBallIndex;
+      if (idA !== idB && !(balls[idA].pinned && balls[idB].pinned)) {
+        setRotateAround(idA, idB);
       }
     } else if (dragInfo.mouseKey === 1 && centeredBallIndex === null) {
       // move camera center
@@ -903,6 +1036,39 @@ export default function GravitationPage() {
         setCenteredBallIndex(selectedBallIndex);
       }
     }
+  }
+
+  function calculateNewVectorUnit(newDrawVectorType) {
+    let newUnit = controlState.drawVectorUnit;
+    if (newDrawVectorType !== "none") {
+      let maxPhysicsLength = 1e-6;
+      balls.forEach((ball, index) => {
+        if (ball.pinned) { return; }
+        let physicsVector = { x: 0, y: 0 };
+        if (newDrawVectorType === "velocity") {
+          physicsVector = ball.velocity;
+        } else if (newDrawVectorType === "force") {
+          physicsVector = calculateForce(ball, balls, index);
+        } else if (newDrawVectorType === "acceleration") {
+          physicsVector = Vector.div(calculateForce(ball, balls, index), ball.mass);
+        }
+        let physicsLength = Vector.length(physicsVector);
+        if (physicsLength > maxPhysicsLength) {
+          maxPhysicsLength = physicsLength;
+        }
+      });
+      newUnit = 1 / maxPhysicsLength * Math.min(clientSize.width, clientSize.height) / 3;
+    }
+    return newUnit;
+  }
+
+  function userChangeDrawVectorType(newDrawVectorType) {
+    let newUnit = calculateNewVectorUnit(newDrawVectorType);
+    setControlState({
+      ...controlState,
+      drawVectorType: newDrawVectorType,
+      drawVectorUnit: newUnit,
+    })
   }
 
   let subcontrolsPanel = null;
@@ -1040,43 +1206,94 @@ export default function GravitationPage() {
         </Grid2>
       </Box>
 
-      {AlignedNumberInput(
-        <span>trace length</span>,
-        controlState.traceTicks, (e) => {
-          setControlState({ ...controlState, traceTicks: e.target.value });
-          let v = parseInt(e.target.value);
-          if (isNaN(v)) { v = 0; }
-          const balls = timedEventHelper.current.balls;
-          let setAny = false;
-          balls.forEach((ball) => {
-            if (ball.trace.length > v) {
-              setAny = true;
-              ball.trace = ball.trace.slice(0, v);
-            }
-          })
-          if (setAny) {
-            setBalls([...balls]);
-          }
-        },
-        "ticks",
-        "100%",
-      )}
       
-      <FormControl fullWidth variant="standard" size="small">
-        <InputLabel id="trace-type-label">trace which balls</InputLabel>
-        <Select
-          labelId="trace-type-label"
-          value={controlState.traceType}
-          onChange={(e) => {
-            setControlState({ ...controlState, traceType: e.target.value });
-          }}
-        >
-          <MenuItem value="none">none</MenuItem>
-          <MenuItem value="selected">selected</MenuItem>
-          <MenuItem value="all">all of'em</MenuItem>
-        </Select>
-      </FormControl>
-      
+      <Box width="100%">
+        <Grid2 container spacing={1}>
+          <Grid2 size={6}>
+            <FormControl fullWidth variant="standard" size="small">
+              <InputLabel id="trace-type-label">trace which balls</InputLabel>
+              <Select
+                labelId="trace-type-label"
+                value={controlState.traceType}
+                onChange={(e) => {
+                  setControlState({ ...controlState, traceType: e.target.value });
+                }}
+              >
+                <MenuItem value="none">none</MenuItem>
+                <MenuItem value="selected">selected</MenuItem>
+                <MenuItem value="all">all of'em</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid2>
+          <Grid2 size={6}>
+            {AlignedNumberInput(
+              <span>with a length of</span>,
+              controlState.traceTicks, (e) => {
+                setControlState({ ...controlState, traceTicks: e.target.value });
+                let v = parseInt(e.target.value);
+                if (isNaN(v)) { v = 0; }
+                const balls = timedEventHelper.current.balls;
+                let setAny = false;
+                balls.forEach((ball) => {
+                  if (ball.trace.length > v) {
+                    setAny = true;
+                    ball.trace = ball.trace.slice(0, v);
+                  }
+                })
+                if (setAny) {
+                  setBalls([...balls]);
+                }
+              },
+              "ticks",
+              "100%",
+              false,
+              {
+                disabled: controlState.traceType === "none"
+              }
+            )}
+          </Grid2>
+        </Grid2>
+      </Box>
+
+      <Box width="100%">
+        <Grid2 container spacing={1}>
+          <Grid2 size={6}>
+            <FormControl fullWidth variant="standard" size="small">
+              <InputLabel id="draw-vector-type-label">draw what vectors</InputLabel>
+              <Select
+                labelId="draw-vector-type-label"
+                value={controlState.drawVectorType}
+                onChange={(e) => {
+                  userChangeDrawVectorType(e.target.value);
+                }}
+              >
+                <MenuItem value="none">none</MenuItem>
+                <MenuItem value="velocity">velocity</MenuItem>
+                <MenuItem value="force">force</MenuItem>
+                <MenuItem value="acceleration">acceleration</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid2>
+          <Grid2 size={6}>
+            <FormControl fullWidth variant="standard" size="small">
+              <InputLabel id="draw-vector-subjects-label">of which balls</InputLabel>
+              <Select
+                labelId="draw-vector-subjects-label"
+                value={controlState.drawVectorSubjects}
+                disabled={controlState.drawVectorType === "none"}
+                onChange={(e) => {
+                  setControlState({ ...controlState, drawVectorSubjects: e.target.value });
+                }}
+              >
+                <MenuItem value="selected">selected</MenuItem>
+                <MenuItem value="all">all of'em</MenuItem>
+              </Select>
+            </FormControl>
+          </Grid2>
+        </Grid2>
+      </Box>
+
+
     </Stack>
 
   } else if (controlState.mode === "edit") {
@@ -1157,9 +1374,67 @@ export default function GravitationPage() {
           }
         }}
       >
-        pin position
+        pin position{selectedBallIndex !== null ? " [" + selectedBallIndex + "]" : ""}
       </CButton>
 
+    </Stack>
+  } else if (controlState.mode === "velocity") {
+    subcontrolsPanel = <Stack direction="column" spacing={1}>
+      <Stack direction="column">
+        <BulletinText width="15rem">left-click and drag: set velocity </BulletinText>
+        <BulletinText width="15rem">right-click, drag to another ball and release: set rotate around </BulletinText>
+      </Stack>
+      <CButton
+        variant="outlined"
+        color="blue"
+        sx={{ width: "100%" }}
+        disabled={selectedBallIndex === null}
+        onClick={() => {
+          if (selectedBallIndex !== null) {
+            setBalls(balls.map((ball, index) => {
+              if (index === selectedBallIndex) {
+                return {
+                  ...ball,
+                  velocity: { x: -ball.velocity.x, y: -ball.velocity.y },
+                }
+              }
+              return ball;
+            }))
+          }
+        }}
+      >reverse velocity{selectedBallIndex !== null ? " [" + selectedBallIndex + "]" : ""}</CButton>
+      <CButton
+        variant="outlined"
+        color="blue"
+        sx={{ width: "100%" }}
+        disabled={selectedBallIndex === null}
+        onClick={() => {
+          if (selectedBallIndex !== null) {
+            setBalls(balls.map((ball, index) => {
+              if (index === selectedBallIndex) {
+                return {
+                  ...ball,
+                  velocity: { x: 0, y: 0 },
+                }
+              }
+              return ball;
+            }))
+          }
+        }}
+      >set stationary{selectedBallIndex !== null ? " [" + selectedBallIndex + "]" : ""}</CButton>
+      <CButton
+        variant="outlined"
+        color="warning"
+        sx={{ width: "100%" }}
+        onClick={() => {
+          setBalls(balls.map((ball, index) => {
+            return {
+              ...ball,
+              velocity: { x: 0, y: 0 },
+            }
+          }))
+        }}
+      >set all stationary</CButton>
     </Stack>
   }
   
@@ -1287,7 +1562,11 @@ export default function GravitationPage() {
                 variant={(controlState.mode === "play" || controlState.mode === "pause") ? "contained" : "outlined"}
                 onClick={() => {
                   if (controlState.mode !== "pause" && controlState.mode !== "play") {
-                    setControlState({ ...controlState, mode: "pause" });
+                    setControlState({ 
+                      ...controlState,
+                      mode: "pause",
+                      drawVectorUnit: calculateNewVectorUnit(controlState.drawVectorType),
+                    });
                   }
                 }}
                 color="blue"
@@ -1314,7 +1593,10 @@ export default function GravitationPage() {
               <CButton 
                 variant={(controlState.mode === "velocity") ? "contained" : "outlined"}
                 onClick={() => {
-                  setControlState({ ...controlState, mode: "velocity" });
+                  setControlState({ ...controlState, 
+                    mode: "velocity",
+                    drawVectorUnit: calculateNewVectorUnit("velocity"),
+                  });
                 }}
                 color="red"
               >velocity</CButton>
