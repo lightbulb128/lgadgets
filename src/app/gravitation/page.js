@@ -2,8 +2,10 @@
 
 import { 
   Box, Paper, Stack, Divider, Button, TextField, ThemeProvider, Typography,
-  FormControl, InputLabel, Select, MenuItem, OutlinedInput, InputAdornment, Input, FormHelperText, Grid2
+  FormControl, InputLabel, Select, MenuItem, OutlinedInput, InputAdornment, Input, FormHelperText, Grid2,
+  List, ListItem, ListItemText, IconButton
 } from "@mui/material"
+import { Delete as DeleteIcon } from "@mui/icons-material"
 import { useState, useEffect, useRef } from "react"
 import { createTheme } from "@mui/material/styles"
 import { Color } from "../utils"
@@ -96,7 +98,7 @@ function BulletinText({ children, width="15rem", ...props }) {
       <Typography variant="body2" sx={{ fontWeight: "bold" }}>•</Typography>
       <Typography sx={{
         whiteSpace: "pre-wrap",
-        fontSize: "0.9rem",
+        fontSize: "0.8rem",
         ...props.sx
       }}>
         {children}
@@ -182,7 +184,7 @@ export default function GravitationPage() {
   })
   const canvasRef = useRef(null)
   const [controlState, setControlState] = useState({
-    mode: "play", // play, pause, create, edit, velocity
+    mode: "pause", // play, pause, create, edit, velocity
     pixelsPerMeter: 100,
     cameraCenter: { x: 0, y: 0 },
     createMassFormula: "volumeDensity", // volumeDensity, areaDensity, fixed
@@ -196,7 +198,14 @@ export default function GravitationPage() {
     drawVectorType: "none", // none, velocity, force, acceleration
     drawVectorSubjects: "selected", // selected, all
     drawVectorUnit: 100,
+    helpHidden: false,
+    drawGrid: true,
+    drawGridLegend: true,
+    arrowWidth: 4,
+    arrowHead: 24,
+    selectedRecordedVelocityIndex: 0,
   })
+  const [recordedVelocities, setRecordedVelocities] = useState([])
   const [renderInterval, setRenderInterval] = useState(null)
   const [balls, setBalls] = useState([])
   const [dragInfo, setDragInfo] = useState({
@@ -209,6 +218,56 @@ export default function GravitationPage() {
   const [selectedBallIndex, setSelectedBallIndex] = useState(null)
   const [centeredBallIndex, setCenteredBallIndex] = useState(null)
   const [temporaryValue, setTemporaryValue] = useState("")
+
+  function saveState() {
+    let state = {};
+    // from controlState: pixelsPerMeter, cameraCenter, gravitationalConstant, gravitationFormula, confinedBox
+    // from balls: don't record color, trace
+    state.controlState = {
+      pixelsPerMeter: controlState.pixelsPerMeter,
+      cameraCenter: controlState.cameraCenter,
+      gravitationalConstant: controlState.gravitationalConstant,
+      gravitationFormula: controlState.gravitationFormula,
+      confinedBox: controlState.confinedBox,
+    }
+    state.balls = balls.map((ball) => {
+      return {
+        center: { ...ball.center },
+        radius: ball.radius,
+        mass: ball.mass,
+        velocity: { ...ball.velocity },
+        pinned: ball.pinned,
+      }
+    })
+    return JSON.stringify(state, null, 2);
+  }
+
+  function loadState(jsonDict) {
+    if (jsonDict === null) { return; }
+    let state = JSON.parse(jsonDict);
+    if (state.controlState === undefined || state.balls === undefined) { return; }
+    setControlState({
+      ...controlState,
+      mode: "pause",
+      pixelsPerMeter: state.controlState.pixelsPerMeter,
+      cameraCenter: state.controlState.cameraCenter,
+      gravitationalConstant: state.controlState.gravitationalConstant,
+      gravitationFormula: state.controlState.gravitationFormula,
+      confinedBox: state.controlState.confinedBox,
+    })
+    setBalls(state.balls.map((ball) => {
+      return {
+        center: { ...ball.center },
+        radius: ball.radius,
+        mass: ball.mass,
+        velocity: { ...ball.velocity },
+        pinned: ball.pinned,
+        trace: [],
+        color: Color.fromHSV(Math.random() * 360, 0.5, 1),
+      }
+    }))
+  }
+
   const timedEventHelper = useRef({
     canvasRef,
     controlState,
@@ -218,6 +277,7 @@ export default function GravitationPage() {
     highlightedBallIndex,
     selectedBallIndex,
     centeredBallIndex,
+    recordedVelocities,
   });
   
   useEffect(() => {
@@ -230,6 +290,7 @@ export default function GravitationPage() {
       highlightedBallIndex,
       selectedBallIndex,
       centeredBallIndex,
+      recordedVelocities,
     }
   });
   
@@ -364,8 +425,8 @@ export default function GravitationPage() {
       const p6 = Vector.add(start, Vector.mul(dx, -width / 2));
       const p1 = Vector.add(p0, Vector.mul(dy, length - head * 2 / 3));
       const p5 = Vector.add(p6, Vector.mul(dy, length - head * 2 / 3));
-      const p2 = Vector.add(Vector.add(p1, Vector.mul(dx, width)), Vector.mul(dy, -head / 3));
-      const p4 = Vector.add(Vector.add(p5, Vector.mul(dx, -width)), Vector.mul(dy, -head / 3));
+      const p2 = Vector.add(Vector.add(p1, Vector.mul(dx, width * 1.5)), Vector.mul(dy, -head / 3));
+      const p4 = Vector.add(Vector.add(p5, Vector.mul(dx, -width * 1.5)), Vector.mul(dy, -head / 3));
       const p3 = end;
       offscreenContext.moveTo(p0.x, p0.y);
       offscreenContext.beginPath();
@@ -393,7 +454,7 @@ export default function GravitationPage() {
       function drawGrid(unit, color, width, legendExponent = null) {
         const gridLeft = Math.floor(worldLeft / unit) * unit;
         const gridBottom = Math.floor(worldBottom / unit) * unit;
-        {
+        if (controlState.drawGrid) {
           let x = gridLeft;
           while (x < worldRight) {
             const screenX = worldToScreen({ x, y: 0 }).x;
@@ -401,7 +462,7 @@ export default function GravitationPage() {
             x += unit;
           }
         }
-        {
+        if (controlState.drawGrid) {
           let y = gridBottom;
           while (y < worldBottom + worldHeight) {
             const screenY = worldToScreen({ x: 0, y }).y;
@@ -411,7 +472,10 @@ export default function GravitationPage() {
         }
         if (legendExponent !== null) {
           // write a "10^legendExponent m" at bottom left
-          const screenLegend = worldToScreen({ x: gridLeft + unit * 2, y: gridBottom + unit * 2 });
+          let screenLegend = worldToScreen({ x: gridLeft + unit * 2, y: gridBottom + unit * 2 });
+          if (!controlState.drawGrid) {
+            screenLegend = { x: 100, y: clientSize.height - 100 }
+          }
           offscreenContext.font = "12px Arial";
           offscreenContext.fillStyle = "white";
           offscreenContext.textAlign = "left";
@@ -420,10 +484,12 @@ export default function GravitationPage() {
           if (legendExponent == 0) { text = "1 m"; }
           if (legendExponent == 1) { text = "10 m"; }
           if (legendExponent == -1) { text = "0.1 m"; }
-          offscreenContext.fillText(text, screenLegend.x + 3, screenLegend.y - 3);
-          const p1 = worldToScreen({ x: gridLeft + unit * 2, y: gridBottom + unit * 2 });
-          const p2 = worldToScreen({ x: gridLeft + unit * 3, y: gridBottom + unit * 2 });
-          drawLine(p1, p2, "white", 3);
+          const p1 = screenLegend;
+          const p2 = { x: p1.x + metersToPixels(unit), y: p1.y };
+          if (controlState.drawGridLegend) {
+            offscreenContext.fillText(text, screenLegend.x + 3, screenLegend.y - 3);
+            drawLine(p1, p2, "white", 3);
+          }
         }
       }
       let unit = 1; let exponent = 0;
@@ -509,7 +575,7 @@ export default function GravitationPage() {
           let hsv = color.toHSV();
           hsv.s = 0.5; hsv.v = 0.9;
           color = Color.fromHSV(hsv.h, hsv.s, hsv.v);
-          drawArrow(screenCenter, Vector.add(screenCenter, screenVector), color.toString(), 4, 18);
+          drawArrow(screenCenter, Vector.add(screenCenter, screenVector), color.toString(), controlState.arrowWidth, controlState.arrowHead);
         }
       }
     })
@@ -567,23 +633,6 @@ export default function GravitationPage() {
     }
     mainContext.drawImage(offscreenCanvas, 0, 0);
   }
-
-  useEffect(() => {
-    window.addEventListener("resize", () => {
-      setClientSize({
-        width: window.innerWidth,
-        height: window.innerHeight
-      })
-    })
-    setClientSize({
-      width: window.innerWidth,
-      height: window.innerHeight
-    })
-    // prevent context menu for right click for canvas
-    window.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-    })
-  }, [])
 
   useEffect(() => {
     if (controlState.mode !== "play") {
@@ -989,7 +1038,7 @@ export default function GravitationPage() {
     const delta = e.deltaY;
     const factor = 1.1;
     let mode = controlState.mode;
-    if (mode == "edit" && (selectedBallIndex === null || highlightedBallIndex !== null)) {
+    if (mode == "edit" && (selectedBallIndex !== null || highlightedBallIndex !== null)) {
       let targetIndex = selectedBallIndex !== null ? selectedBallIndex : highlightedBallIndex;
       // update mass
       let newMass = balls[targetIndex].mass;
@@ -1071,14 +1120,238 @@ export default function GravitationPage() {
     })
   }
 
+  function setTraceLength(newTraceLength) {
+    const controlState = timedEventHelper.current.controlState;
+    setControlState({ ...controlState, traceTicks: newTraceLength });
+    let v = parseInt(newTraceLength);
+    if (isNaN(v)) { v = 0; }
+    const balls = timedEventHelper.current.balls;
+    let setAny = false;
+    balls.forEach((ball) => {
+      if (ball.trace.length > v) {
+        setAny = true;
+        ball.trace = ball.trace.slice(0, v);
+      }
+    })
+    if (setAny) {
+      setBalls([...balls]);
+    }
+  }
+
+  function userGotoPlayPanel() {
+    const controlState = timedEventHelper.current.controlState;
+    if (controlState.mode !== "pause" && controlState.mode !== "play") {
+      setControlState({ 
+        ...controlState,
+        mode: "pause",
+        drawVectorUnit: calculateNewVectorUnit(controlState.drawVectorType),
+      });
+    }
+  }
+
+  function userGotoCreatePanel() {
+    const controlState = timedEventHelper.current.controlState;
+    setHighlightedBallIndex(null);
+    setSelectedBallIndex(null);
+    setCenteredBallIndex(null);
+    setControlState({ ...controlState, mode: "create" });
+  }
+
+  function userGotoEditPanel() {
+    const controlState = timedEventHelper.current.controlState;
+    setControlState({ ...controlState, mode: "edit" });
+  }
+
+  function userGotoVelocityPanel() {
+    const controlState = timedEventHelper.current.controlState;
+    setControlState({ ...controlState, 
+      mode: "velocity",
+      drawVectorUnit: calculateNewVectorUnit("velocity"),
+    });
+  }
+
+  function userSetGuiHidden() {
+    const controlState = timedEventHelper.current.controlState;
+    setControlState({ ...controlState, guiHidden: !controlState.guiHidden });
+  }
+
+  function userSetHelpHidden() {
+    const controlState = timedEventHelper.current.controlState;
+    setControlState({ ...controlState, helpHidden: !controlState.helpHidden });
+  }
+
+  function userKeyDown(e) {
+    if (e.key === "z" || e.key === "Z") {
+      console.log("z pressed");
+      userGotoPlayPanel();
+    } else if (e.key === "x" || e.key === "X") {
+      userGotoCreatePanel();
+    } else if (e.key === "c" || e.key === "C") {
+      userGotoEditPanel();
+    } else if (e.key === "v" || e.key === "V") {
+      userGotoVelocityPanel();
+    } else if (e.key === "h" || e.key === "H") {
+      userSetHelpHidden();
+    } else if (e.key === "a" || e.key === "A") {
+      userSetGuiHidden();
+    } else if (e.key === " ") {
+      const controlState = timedEventHelper.current.controlState;
+      if (controlState.mode === "play") {
+        setControlState({ ...controlState, mode: "pause" });
+      } else {
+        setControlState({ ...controlState, mode: "play" });
+      }
+    } else if (e.key === "b" || e.key === "B") {
+      const controlState = timedEventHelper.current.controlState;
+      setControlState({ ...controlState, confinedBox: !controlState.confinedBox });
+    } else if (e.key === "p" || e.key === "P") {
+      let { balls, selectedBallIndex, highlightedBallIndex } = timedEventHelper.current;
+      if (selectedBallIndex !== null || highlightedBallIndex !== null) {
+        let pinId = selectedBallIndex !== null ? selectedBallIndex : highlightedBallIndex;
+        setBalls(balls.map((ball, index) => {
+          if (index === pinId) {
+            return { ...ball, pinned: !ball.pinned };
+          }
+          return ball;
+        }))
+      }
+    } else if (e.key === "r" || e.key === "R") {
+      let { balls, selectedBallIndex, highlightedBallIndex } = timedEventHelper.current;
+      if (selectedBallIndex !== null || highlightedBallIndex !== null) {
+        let bid = selectedBallIndex !== null ? selectedBallIndex : highlightedBallIndex;
+        setBalls(balls.map((ball, index) => {
+          if (index === bid) {
+            return { ...ball, velocity: { x: -ball.velocity.x, y: -ball.velocity.y } };
+          }
+          return ball;
+        }))
+      }
+    } else if (e.key === "u" || e.key === "U") {
+      let { balls, selectedBallIndex, highlightedBallIndex } = timedEventHelper.current;
+      if (selectedBallIndex !== null || highlightedBallIndex !== null) {
+        let bid = selectedBallIndex !== null ? selectedBallIndex : highlightedBallIndex;
+        setBalls(balls.map((ball, index) => {
+          if (index === bid) {
+            return { ...ball, velocity: { x: 0, y: 0 } };
+          }
+          return ball;
+        }))
+      }
+    } else if (e.key === "t" || e.key === "T") {
+      const controlState = timedEventHelper.current.controlState;
+      const newTraceType = controlState.traceType === "none" ? "selected" : (controlState.traceType === "selected" ? "all" : "none");
+      setControlState({ ...controlState, traceType: newTraceType });
+    }
+  }
+
+  function userKeyPress(e) {
+    const controlState = timedEventHelper.current.controlState;
+    if (!e.shiftKey) {
+      if (e.key === "m" || e.key === "M") {
+        // lengthen trace
+        let traceTicks = parseInt(controlState.traceTicks);
+        if (isNaN(traceTicks)) { traceTicks = 0; }
+        traceTicks += 100;
+        setTraceLength(traceTicks.toString());
+      } else if (e.key === "n" || e.key === "N") {
+        // shorten trace
+        let traceTicks = parseInt(controlState.traceTicks);
+        if (isNaN(traceTicks)) { traceTicks = 0; }
+        traceTicks -= 100;
+        if (traceTicks < 0) { traceTicks = 0; }
+        setTraceLength(traceTicks.toString());
+      } else if (e.key === "[" || e.key === "{") {
+        // decrease vector unit
+        let newUnit = controlState.drawVectorUnit / 1.1;
+        setControlState({ ...controlState, drawVectorUnit: newUnit });
+      } else if (e.key === "]" || e.key === "}") {
+        // increase vector unit
+        let newUnit = controlState.drawVectorUnit * 1.1;
+        setControlState({ ...controlState, drawVectorUnit: newUnit });
+      } else if (e.key === "k" || e.key === "K") {
+        // decrease gravitational constant
+        let newG = parseFloat(controlState.gravitationalConstant);
+        if (isNaN(newG)) { newG = 1; }
+        newG /= 1.1;
+        setControlState({ ...controlState, gravitationalConstant: newG.toString() });
+      } else if (e.key === "l" || e.key === "L") {
+        // increase gravitational constant
+        let newG = parseFloat(controlState.gravitationalConstant);
+        if (isNaN(newG)) { newG = 1; }
+        newG *= 1.1;
+        setControlState({ ...controlState, gravitationalConstant: newG.toString() });
+      } else if (e.key === "g" || e.key === "G") {
+        // toggle grid
+        let newGrid = !controlState.drawGrid;
+        setControlState({ ...controlState, drawGrid: newGrid });
+      }
+    } else {
+      if (e.key === "g" || e.key === "G") {
+        // toggle grid legend
+        let newGridLegend = !controlState.drawGridLegend;
+        setControlState({ ...controlState, drawGridLegend: newGridLegend });
+      } else if (e.key === "[" || e.key === "{") {
+        const ratio = controlState.arrowHead / controlState.arrowWidth;
+        let newArrowWidth = controlState.arrowWidth - 2;
+        if (newArrowWidth < 2) { newArrowWidth = 2; }
+        setControlState({ ...controlState, 
+          arrowWidth: newArrowWidth,
+          arrowHead: newArrowWidth * ratio
+        });
+      } else if (e.key === "]" || e.key === "}") {
+        const ratio = controlState.arrowHead / controlState.arrowWidth;
+        let newArrowWidth = controlState.arrowWidth + 2;
+        setControlState({ ...controlState, 
+          arrowWidth: newArrowWidth,
+          arrowHead: newArrowWidth * ratio
+        });
+      }
+    }
+  }
+  
+  useEffect(() => {
+    window.addEventListener("resize", () => {
+      setClientSize({
+        width: window.innerWidth,
+        height: window.innerHeight
+      })
+    })
+    setClientSize({
+      width: window.innerWidth,
+      height: window.innerHeight
+    })
+    // prevent context menu for right click for canvas
+    window.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+    })
+    window.addEventListener("keydown", userKeyDown);
+    window.addEventListener("keypress", userKeyPress);
+  }, [])
+
   let subcontrolsPanel = null;
+  let helpItems = [
+    "Z, X, C, V: switch panel",
+    "B: toggle confined box",
+    "H: toggle help",
+    "A: toggle gui",
+    "P: pin/unpin selected",
+    "R: reverse selected velocity",
+    "U: set selected stationary",
+    "T: toggle trace",
+    "N/M: lengthen/shorten trace",
+    "[/]: dec/increase vector unit",
+    "shift-[/]: adjust arrow display",
+    "K/L: dec/increase gravitational constant",
+    "G: toggle grid",
+    "shift-G: toggle grid legend",
+    "middle-drag: move camera",
+  ]
   if (controlState.mode === "create") {
     const cmf = controlState.createMassFormula;
+    helpItems.push("left-drag: create");
+    helpItems.push("right-click: remove");
+    helpItems.push("scroll: zoom");
     subcontrolsPanel = <Stack direction="column" spacing={1}>
-      <Stack direction="column">
-        <BulletinText width="15rem">left-click and drag: create </BulletinText>
-        <BulletinText width="15rem">right-click: remove </BulletinText>
-      </Stack>
       <CButton variant="outlined" color="warning"
         onClick={() => {
           setBalls([]);
@@ -1121,10 +1394,10 @@ export default function GravitationPage() {
     </Stack>
   } else if (controlState.mode === "play" || controlState.mode === "pause") {
     const gf = controlState.gravitationFormula;
+    helpItems.push("left-click: select");
+    helpItems.push("scroll: zoom");
+    helpItems.push("space: play/pause");
     subcontrolsPanel = <Stack direction="column" spacing={1}>
-      <Stack direction="column">
-        <BulletinText width="15rem">left-click: select</BulletinText>
-      </Stack>
       <CButton 
         variant={(controlState.mode === "play") ? "contained" : "outlined"}
         color="blue"
@@ -1176,13 +1449,13 @@ export default function GravitationPage() {
           <Grid2 size={6}>
             <CButton 
               variant={(controlState.confinedBox) ? "contained" : "outlined"}
-              color="blue"
+              color="white"
               sx={{ width: "100%" }}
               onClick={() => {
                 setControlState({ ...controlState, confinedBox: !controlState.confinedBox });
               }}
             >
-              hard border
+              confining border
             </CButton>
           </Grid2>
           <Grid2 size={6}>
@@ -1229,20 +1502,7 @@ export default function GravitationPage() {
             {AlignedNumberInput(
               <span>with a length of</span>,
               controlState.traceTicks, (e) => {
-                setControlState({ ...controlState, traceTicks: e.target.value });
-                let v = parseInt(e.target.value);
-                if (isNaN(v)) { v = 0; }
-                const balls = timedEventHelper.current.balls;
-                let setAny = false;
-                balls.forEach((ball) => {
-                  if (ball.trace.length > v) {
-                    setAny = true;
-                    ball.trace = ball.trace.slice(0, v);
-                  }
-                })
-                if (setAny) {
-                  setBalls([...balls]);
-                }
+                setTraceLength(e.target.value);
               },
               "ticks",
               "100%",
@@ -1293,18 +1553,72 @@ export default function GravitationPage() {
         </Grid2>
       </Box>
 
+      <Box width="100%">
+        <Grid2 container spacing={1}>
+          <Grid2 size={6}>
+            <CButton 
+              variant={"outlined"}
+              color="green"
+              sx={{ width: "100%" }}
+              onClick={() => {
+                let json = saveState();
+                let blob = new Blob([json], {type: "application/json"});
+                let url = URL.createObjectURL(blob);
+                let a = document.createElement("a");
+                a.href = url;
+                a.download = "save.json";
+                a.click();
+                URL.revokeObjectURL(url);
+                // release document element
+                a.remove();
+              }}
+            >
+              save to file
+            </CButton>
+          </Grid2>
+          <Grid2 size={6}>
+            <CButton 
+              variant={"outlined"}
+              color="yellow"
+              sx={{ width: "100%" }}
+              onClick={() => {
+                let input = document.createElement("input");
+                input.type = "file";
+                input.accept = ".json";
+                input.onchange = (e) => {
+                  let file = e.target.files[0];
+                  let reader = new FileReader();
+                  reader.onload = (e) => {
+                    let json = e.target.result;
+                    loadState(json);
+                  }
+                  reader.readAsText(file);
+                }
+                input.click();
+                input.remove();
+              }} 
+            >
+              load from file
+            </CButton> 
+          </Grid2>
+        </Grid2>
+      </Box>
 
     </Stack>
 
   } else if (controlState.mode === "edit") {
     const cmf = controlState.createMassFormula;
+    helpItems.push("left/right click: select");
+    helpItems.push("left-drag: move");
+    helpItems.push("right-drag: resize");
+    if (selectedBallIndex !== null) {
+      helpItems.push("scroll: change selected mass");
+    } else if (highlightedBallIndex !== null) {
+      helpItems.push("scroll: change highlighted mass");
+    } else {
+      helpItems.push("scroll: zoom");
+    }
     subcontrolsPanel = <Stack direction="column" spacing={1}>
-      <Stack direction="column">
-        <BulletinText width="15rem">left/right click: select </BulletinText>
-        <BulletinText width="15rem">left-click and drag: move </BulletinText>
-        <BulletinText width="15rem">right-click and drag: resize </BulletinText>
-        <BulletinText width="15rem">wheel: change selected mass</BulletinText>
-      </Stack>
       <FormControl fullWidth variant="standard" size="small">
         <InputLabel id="create-mass-formula-label">resize mass</InputLabel>
         <Select
@@ -1379,11 +1693,9 @@ export default function GravitationPage() {
 
     </Stack>
   } else if (controlState.mode === "velocity") {
+    helpItems.push("left-click and drag: set velocity");
+    helpItems.push(<span>right-click, drag to another ball and release: for the two balls, a rotation velocity is calculated and <strong>added to their original velocity</strong></span>);
     subcontrolsPanel = <Stack direction="column" spacing={1}>
-      <Stack direction="column">
-        <BulletinText width="15rem">left-click and drag: set velocity </BulletinText>
-        <BulletinText width="15rem">right-click, drag to another ball and release: set rotate around </BulletinText>
-      </Stack>
       <CButton
         variant="outlined"
         color="blue"
@@ -1435,6 +1747,111 @@ export default function GravitationPage() {
           }))
         }}
       >set all stationary</CButton>
+
+      <Divider />
+
+      <CButton 
+        variant={"outlined"}
+        color="green"
+        disabled={selectedBallIndex === null}
+        sx={{ width: "100%" }}
+        onClick={() => {
+          setRecordedVelocities([
+            ...recordedVelocities,
+            balls[selectedBallIndex].velocity,
+          ])
+        }}
+      >
+        record selected [{selectedBallIndex}] vel to list
+      </CButton>
+
+      <List>
+        {recordedVelocities.map((recordedVelocity, index) => {
+          return <ListItem key={index}
+            secondaryAction={
+              <IconButton edge="end" aria-label="delete" size="small" onClick={() => {
+                const newRecordedVelocities = recordedVelocities.filter((_, i) => i !== index);
+                setRecordedVelocities(newRecordedVelocities);
+                if (controlState.selectedRecordedVelocityIndex >= newRecordedVelocities.length) {
+                  setControlState({
+                    ...controlState,
+                    selectedRecordedVelocityIndex: null,
+                  })
+                }
+              }}>
+                <DeleteIcon />
+              </IconButton>
+            }
+            onClick={() => {
+              setControlState({
+                ...controlState,
+                selectedRecordedVelocityIndex: index,
+              })
+            }}
+            sx={{ 
+              cursor: "pointer",
+              height: "1.5rem",
+              backgroundColor: controlState.selectedRecordedVelocityIndex === index ? theme.palette.red.backgroundDark : "transparent",
+            }}
+          >
+            <ListItemText primary={
+              <span>[{index}] ({ScientificNumberText(recordedVelocity.x)}, {ScientificNumberText(recordedVelocity.y)}) m/s</span>
+            }></ListItemText>
+          </ListItem>
+        })}
+        {recordedVelocities.length === 0 && <ListItem sx={{
+          height: "1.5rem",
+        }}>
+          <ListItemText primary="(empty list)"></ListItemText>
+        </ListItem>}
+      </List>
+
+      <CButton 
+        variant={"outlined"}
+        color="green"
+        disabled={selectedBallIndex === null || recordedVelocities.length === 0}
+        sx={{ width: "100%" }}
+        onClick={() => {
+          const sv = recordedVelocities[controlState.selectedRecordedVelocityIndex];
+          if (sv !== undefined) {
+            setBalls(balls.map((ball, index) => {
+              if (index === selectedBallIndex) {
+                return {
+                  ...ball,
+                  velocity: sv,
+                }
+              }
+              return ball;
+            }))
+          }
+        }}
+      >
+        set this to selected [{selectedBallIndex}]
+      </CButton>
+
+      <CButton 
+        variant={"outlined"}
+        color="yellow"
+        disabled={selectedBallIndex === null || recordedVelocities.length === 0}
+        sx={{ width: "100%" }}
+        onClick={() => {
+          const sv = recordedVelocities[controlState.selectedRecordedVelocityIndex];
+          if (sv !== undefined) {
+            setBalls(balls.map((ball, index) => {
+              if (index === selectedBallIndex) {
+                return {
+                  ...ball,
+                  velocity: Vector.add(ball.velocity, sv),
+                }
+              }
+              return ball;
+            }))
+          }
+        }}
+      >
+        add this to selected [{selectedBallIndex}]
+      </CButton>
+
     </Stack>
   }
   
@@ -1553,84 +1970,79 @@ export default function GravitationPage() {
       <Box sx={{
         position: "absolute"
       }} padding={1}>
-        <Paper><Box padding={1}>
+        <Stack direction="column" spacing={1}>
           
-          {!controlState.guiHidden && <Stack direction="row" spacing={1} divider={<Divider orientation="vertical" flexItem />}>
+          <Box><Paper sx={{width: "auto",  display: "inline-block"}}><Box padding={1}>
+            
+            {!controlState.guiHidden && <Stack direction="row" spacing={1} divider={<Divider orientation="vertical" flexItem />}>
 
-            <Stack direction="column" spacing={1}>
-              <CButton 
-                variant={(controlState.mode === "play" || controlState.mode === "pause") ? "contained" : "outlined"}
-                onClick={() => {
-                  if (controlState.mode !== "pause" && controlState.mode !== "play") {
-                    setControlState({ 
-                      ...controlState,
-                      mode: "pause",
-                      drawVectorUnit: calculateNewVectorUnit(controlState.drawVectorType),
-                    });
-                  }
-                }}
-                color="blue"
-              >
-                play
-              </CButton>
-              <CButton 
-                variant={(controlState.mode === "create") ? "contained" : "outlined"}
-                onClick={() => {
-                  setHighlightedBallIndex(null);
-                  setSelectedBallIndex(null);
-                  setCenteredBallIndex(null);
-                  setControlState({ ...controlState, mode: "create" });
-                }}
-                color="green"
-              >create</CButton>
-              <CButton 
-                variant={(controlState.mode === "edit") ? "contained" : "outlined"}
-                onClick={() => {
-                  setControlState({ ...controlState, mode: "edit" });
-                }}
-                color="yellow"
-              >edit</CButton>
-              <CButton 
-                variant={(controlState.mode === "velocity") ? "contained" : "outlined"}
-                onClick={() => {
-                  setControlState({ ...controlState, 
-                    mode: "velocity",
-                    drawVectorUnit: calculateNewVectorUnit("velocity"),
-                  });
-                }}
-                color="red"
-              >velocity</CButton>
+              <Stack direction="column" spacing={1}>
+                <CButton 
+                  variant={(controlState.mode === "play" || controlState.mode === "pause") ? "contained" : "outlined"}
+                  onClick={userGotoPlayPanel}
+                  color="blue"
+                >
+                  play
+                </CButton>
+                <CButton 
+                  variant={(controlState.mode === "create") ? "contained" : "outlined"}
+                  onClick={userGotoCreatePanel}
+                  color="green"
+                >create</CButton>
+                <CButton 
+                  variant={(controlState.mode === "edit") ? "contained" : "outlined"}
+                  onClick={userGotoEditPanel}
+                  color="yellow"
+                >edit</CButton>
+                <CButton 
+                  variant={(controlState.mode === "velocity") ? "contained" : "outlined"}
+                  onClick={userGotoVelocityPanel}
+                  color="red"
+                >velocity</CButton>
 
+                <CButton 
+                  color="white"
+                  variant={(!controlState.helpHidden) ? "contained" : "outlined"}
+                  onClick={userSetHelpHidden}
+                >help</CButton>
+
+                <CButton 
+                  variant={(controlState.guiHidden) ? "contained" : "outlined"}
+                  onClick={() => {
+                    setControlState({ ...controlState, guiHidden: !controlState.guiHidden });
+                  }}
+                  color="white"
+                >
+                  {controlState.guiHidden ? "show" : "hide"} gui
+                </CButton>
+                
+              </Stack>
+
+              {!controlState.helpHidden && <Stack direction="column">
+                {helpItems.map((item, index) => {
+                  return <BulletinText width="15rem" key={index}>{item}</BulletinText>
+                })}
+              </Stack>}
+              
+              {subcontrolsPanel}
+
+              {ballInfoPanel}
+
+            </Stack>}
+
+            {controlState.guiHidden && <Box>
               <CButton 
                 variant={(controlState.guiHidden) ? "contained" : "outlined"}
-                onClick={() => {
-                  setControlState({ ...controlState, guiHidden: !controlState.guiHidden });
-                }}
+                onClick={userSetGuiHidden}
                 color="white"
               >
                 {controlState.guiHidden ? "show" : "hide"} gui
               </CButton>
-            </Stack>
+            </Box>}
 
-            {subcontrolsPanel}
+          </Box></Paper></Box>
 
-            {ballInfoPanel}
-
-          </Stack>}
-
-          {controlState.guiHidden && <Box>
-            <CButton 
-              variant={(controlState.guiHidden) ? "contained" : "outlined"}
-              onClick={() => {
-                setControlState({ ...controlState, guiHidden: !controlState.guiHidden });
-              }}
-              color="white"
-            >
-              {controlState.guiHidden ? "show" : "hide"} gui
-            </CButton>
-          </Box>}
-
-        </Box></Paper>
+        </Stack>
       </Box>
       <canvas width={clientSize.width} height={clientSize.height} ref={canvasRef} 
         onMouseDown={canvasMouseDown}
