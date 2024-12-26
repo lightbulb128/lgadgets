@@ -53,6 +53,18 @@ function collision(m1, vx1, vy1, m2, vx2, vy2, dx, dy) {
   }
 }
 
+function pinnedCollision(m1, m2, vx2, vy2, dx, dy) {
+  // c1 is pinned, c2 is colliding with (vx2, vy2) velocity
+  const theta = Math.atan2(dy, dx);
+  const alpha = Math.atan2(-vy2, -vx2);
+  const newAlpha = 2 * theta - alpha;
+  const v = hypot(vx2, vy2);
+  return {
+    vx2: v * Math.cos(newAlpha),
+    vy2: v * Math.sin(newAlpha),
+  }
+}
+
 function Italics({ children }) {
   return <span style={{ fontStyle: "italic" }}>{children}</span>
 }
@@ -409,7 +421,8 @@ export default function GravitationPage() {
     let traceTicks = parseInt(controlState.traceTicks);
     if (isNaN(traceTicks)) { traceTicks = 0; }
     balls.forEach((ball, index) => {
-      if (!(controlState.mode === "play" || controlState.mode === "pause")) { return;}
+      if (!(controlState.mode === "play" || controlState.mode === "pause")) { return; }
+      if (ball.pinned) { return; }
       const drawTrace = controlState.traceType === "all" || (controlState.traceType === "selected" && (selectedBallIndex === index || highlightedBallIndex === index));
       if (!drawTrace) { return; }
       const trace = ball.trace;
@@ -577,30 +590,47 @@ export default function GravitationPage() {
           const dy = b.center.y - a.center.y;
           const distance = hypot(dx, dy);
           if (distance < a.radius + b.radius) {
-            const { vx1, vy1, vx2, vy2 } = collision(
-              a.mass, a.velocity.x, a.velocity.y,
-              b.mass, b.velocity.x, b.velocity.y,
-              dx, dy
-            );
-            a.velocity.x = vx1;
-            a.velocity.y = vy1;
-            b.velocity.x = vx2;
-            b.velocity.y = vy2;
-
             // need to update location so that the balls are not overlapping
+
             if (!a.pinned && !b.pinned) {
+              
+              const { vx1, vy1, vx2, vy2 } = collision(
+                a.mass, a.velocity.x, a.velocity.y,
+                b.mass, b.velocity.x, b.velocity.y,
+                dx, dy
+              );
+              a.velocity.x = vx1;
+              a.velocity.y = vy1;
+              b.velocity.x = vx2;
+              b.velocity.y = vy2;
+
               const touchX = a.center.x + a.radius * dx / (a.radius + b.radius);
               const touchY = a.center.y + a.radius * dy / (a.radius + b.radius);
               a.center.x = touchX - a.radius * dx / distance;
               a.center.y = touchY - a.radius * dy / distance;
               b.center.x = touchX + b.radius * dx / distance;
               b.center.y = touchY + b.radius * dy / distance;
+
             } else if (!a.pinned) {
+              
+              const { vx2, vy2 } = pinnedCollision(
+                b.mass, a.mass, a.velocity.x, a.velocity.y, -dx, -dy
+              );
+              a.velocity.x = vx2;
+              a.velocity.y = vy2;
               a.center.x = b.center.x - dx / distance * (a.radius + b.radius);
               a.center.y = b.center.y - dy / distance * (a.radius + b.radius);
+
             } else if (!b.pinned) {
+              
+              const { vx2, vy2 } = pinnedCollision(
+                a.mass, b.mass, b.velocity.x, b.velocity.y, dx, dy
+              );
+              b.velocity.x = vx2;
+              b.velocity.y = vy2;
               b.center.x = a.center.x + dx / distance * (a.radius + b.radius);
               b.center.y = a.center.y + dy / distance * (a.radius + b.radius);
+
             }
           }
         });
