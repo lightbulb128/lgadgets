@@ -12,6 +12,21 @@ function hypot(x, y) {
   return Math.sqrt(x ** 2 + y ** 2);
 }
 
+class Vector {
+  static add(a, b) {
+    return { x: a.x + b.x, y: a.y + b.y };
+  }
+  static sub(a, b) {
+    return { x: a.x - b.x, y: a.y - b.y };
+  }
+  static mul(a, k) {
+    return { x: a.x * k, y: a.y * k };
+  }
+  static div(a, k) {
+    return { x: a.x / k, y: a.y / k };
+  }
+}
+
 function collision(m1, vx1, vy1, m2, vx2, vy2, dx, dy) {
   // let angle be defined by arctan(dy / dx)
   // First, we take the reference frame of c2. Now c2 is stationary while c1 is colliding with (vx1 - vx2, vy1 - vy2) velocity.
@@ -66,12 +81,13 @@ function BulletinText({ children, width="15rem", ...props }) {
   </Box>
 }
 
-function AlignedNumberInput(label, value, onChange, unit=null, width="5rem") {
+function AlignedNumberInput(label, value, onChange, unit=null, width="5rem", readonly=false, ...props) {
   return <FormControl fullWidth variant="standard" size="small">
     <InputLabel htmlFor="number-input"
     >{label}</InputLabel>
     <Input
       id="number-input"
+      readOnly={readonly}
       value={value}
       onChange={onChange}
       size="small"
@@ -80,6 +96,7 @@ function AlignedNumberInput(label, value, onChange, unit=null, width="5rem") {
       label={label}
       aria-describedby="number-input-label"
       endAdornment={unit === null ? null : <InputAdornment position="end">{unit}</InputAdornment>}
+      {...props}
     />
   </FormControl>
 }
@@ -164,6 +181,7 @@ export default function GravitationPage() {
   const [highlightedBallIndex, setHighlightedBallIndex] = useState(null)
   const [selectedBallIndex, setSelectedBallIndex] = useState(null)
   const [centeredBallIndex, setCenteredBallIndex] = useState(null)
+  const [temporaryValue, setTemporaryValue] = useState("")
   const timedEventHelper = useRef({
     canvasRef,
     controlState,
@@ -344,12 +362,13 @@ export default function GravitationPage() {
 
     // draw balls
     balls.forEach((ball, index) => {
-      const screenCenter = worldToScreen(ball.center);
+      let screenCenter = worldToScreen(ball.center);
       // const screenRadius = metersToPixels(ball.radius);
       // TODO: if the ball is out of the screen, don't draw
       let borderColor = "black";
       let borderWidth = 1;
       let color = ball.color;
+      let radius = ball.radius;
       if (controlState.mode === "create" && !dragInfo.isDragging && highlightedBallIndex === index) {
         borderColor = "red";
         borderWidth = 2;
@@ -357,11 +376,34 @@ export default function GravitationPage() {
       } else if ((controlState.mode === "play" || controlState.mode === "pause") && selectedBallIndex === index) {
         borderColor = "white";
         borderWidth = 5;
-      } else if ((controlState.mode === "play" || controlState.mode === "pause") && highlightedBallIndex === index) {
-        borderColor = "gray";
+      } else if (controlState.mode === "edit" && selectedBallIndex === index) {
+        borderColor = "white";
+        borderWidth = 5;
+        if (dragInfo.isDragging) {
+          if (dragInfo.mouseKey === 0) {
+            screenCenter = {
+              x: screenCenter.x + dragInfo.dragEnd.x - dragInfo.dragStart.x,
+              y: screenCenter.y + dragInfo.dragEnd.y - dragInfo.dragStart.y,
+            }
+          } else if (dragInfo.mouseKey === 2) {
+            const screenDragEnd = dragInfo.dragEnd;
+            const worldDragEnd = screenToWorld(screenDragEnd);
+            radius = hypot(worldDragEnd.x - ball.center.x, worldDragEnd.y - ball.center.y);
+          }
+        }
+      }  else if ((controlState.mode === "play" || controlState.mode === "pause" || controlState.mode === "edit") && highlightedBallIndex === index) {
+        borderColor = "white";
         borderWidth = 2;
       } 
-      drawCircle(screenCenter, metersToPixels(ball.radius), color.toString(), borderColor, borderWidth);
+      drawCircle(screenCenter, metersToPixels(radius), color.toString(), borderColor, borderWidth);
+      if (ball.pinned) {
+        // draw a cross at center
+        const crossSize = 10;
+        const d1 = { x: -Math.SQRT2 / 2, y: Math.SQRT2 / 2 };
+        const d2 = { x: Math.SQRT2 / 2, y: Math.SQRT2 / 2 };
+        drawLine(Vector.add(screenCenter, Vector.mul(d1, crossSize)), Vector.add(screenCenter, Vector.mul(d1, -crossSize)), "black", 6);
+        drawLine(Vector.add(screenCenter, Vector.mul(d2, crossSize)), Vector.add(screenCenter, Vector.mul(d2, -crossSize)), "black", 6);
+      }
     })
     
     let traceTicks = parseInt(controlState.traceTicks);
@@ -443,29 +485,44 @@ export default function GravitationPage() {
   useEffect(() => {
     redraw();
   }, [controlState, dragInfo, highlightedBallIndex, selectedBallIndex, centeredBallIndex])
+
+  function calculateMass(radius, value, formula) {
+    let v = parseFloat(value);
+    if (isNaN(v)) { v = 1; }
+    if (formula === "volumeDensity") {
+      return 4 * Math.PI * v * radius ** 3 / 3;
+    } else if (formula === "areaDensity") {
+      return Math.PI * v * radius ** 2;
+    } else {
+      return v;
+    }
+  }
   
   function createBallMass(radius) {
     const cmf = controlState.createMassFormula;
-    let cmv = parseFloat(controlState.createMassValue);
-    if (isNaN(cmv)) { cmv = 1; }
+    return calculateMass(radius, controlState.createMassValue, cmf);
+  }
+
+  function resetBallMass(oldRadius, oldMass, newRadius) {
+    const cmf = controlState.createMassFormula;
     if (cmf === "volumeDensity") {
-      return 4 * Math.PI * cmv * radius ** 3 / 3;
+      return oldMass * (newRadius / oldRadius) ** 3;
     } else if (cmf === "areaDensity") {
-      return Math.PI * cmv * radius ** 2;
+      return oldMass * (newRadius / oldRadius) ** 2;
     } else {
-      return cmv;
+      return oldMass;
     }
   }
 
-  function calculateForce(balls, index) {
+  function calculateForce(targetBall, balls, skipIndex) {
     let force = { x: 0, y: 0 };
     const controlState = timedEventHelper.current.controlState;
     const G = parseFloat(controlState.gravitationalConstant);
     if (isNaN(G)) { return force; }
     balls.forEach((otherBall, otherIndex) => {
-      if (index === otherIndex) { return; }
-      const dx = otherBall.center.x - balls[index].center.x;
-      const dy = otherBall.center.y - balls[index].center.y;
+      if (skipIndex === otherIndex) { return; }
+      const dx = otherBall.center.x - targetBall.center.x;
+      const dy = otherBall.center.y - targetBall.center.y;
       const distance = hypot(dx, dy) + 1e-6; // avoid division by zero
       let forceBottom = distance ** 2;
       if (controlState.gravitationFormula === "inverseLinear") {
@@ -473,7 +530,7 @@ export default function GravitationPage() {
       } else if (controlState.gravitationFormula === "inverseCube") {
         forceBottom = distance ** 3;
       }
-      const forceMagnitude = G * balls[index].mass * otherBall.mass / forceBottom;
+      const forceMagnitude = G * targetBall.mass * otherBall.mass / forceBottom;
       const forceX = forceMagnitude * dx / distance;
       const forceY = forceMagnitude * dy / distance;
       force.x += forceX;
@@ -498,6 +555,7 @@ export default function GravitationPage() {
       
       // update position
       balls.forEach((ball) => {
+        if (ball.pinned) { return; }
         ball.center.x += ball.velocity.x * deltaTime;
         ball.center.y += ball.velocity.y * deltaTime;
         if (traceTicks > 0) {
@@ -509,7 +567,7 @@ export default function GravitationPage() {
       })
       
       // calculate force
-      let force = balls.map((ball, index) => calculateForce(balls, index));
+      let force = balls.map((ball, index) => calculateForce(ball, balls, index));
 
       // collision
       balls.forEach((a, aIndex) => {
@@ -530,12 +588,20 @@ export default function GravitationPage() {
             b.velocity.y = vy2;
 
             // need to update location so that the balls are not overlapping
-            const touchX = a.center.x + a.radius * dx / (a.radius + b.radius);
-            const touchY = a.center.y + a.radius * dy / (a.radius + b.radius);
-            a.center.x = touchX - a.radius * dx / distance;
-            a.center.y = touchY - a.radius * dy / distance;
-            b.center.x = touchX + b.radius * dx / distance;
-            b.center.y = touchY + b.radius * dy / distance;
+            if (!a.pinned && !b.pinned) {
+              const touchX = a.center.x + a.radius * dx / (a.radius + b.radius);
+              const touchY = a.center.y + a.radius * dy / (a.radius + b.radius);
+              a.center.x = touchX - a.radius * dx / distance;
+              a.center.y = touchY - a.radius * dy / distance;
+              b.center.x = touchX + b.radius * dx / distance;
+              b.center.y = touchY + b.radius * dy / distance;
+            } else if (!a.pinned) {
+              a.center.x = b.center.x - dx / distance * (a.radius + b.radius);
+              a.center.y = b.center.y - dy / distance * (a.radius + b.radius);
+            } else if (!b.pinned) {
+              b.center.x = a.center.x + dx / distance * (a.radius + b.radius);
+              b.center.y = a.center.y + dy / distance * (a.radius + b.radius);
+            }
           }
         });
       });
@@ -565,8 +631,14 @@ export default function GravitationPage() {
 
       // update velocity
       balls.forEach((ball, index) => {
-        ball.velocity.x += force[index].x / ball.mass * deltaTime;
-        ball.velocity.y += force[index].y / ball.mass * deltaTime;
+        if (!ball.pinned) {
+          ball.velocity.x += force[index].x / ball.mass * deltaTime;
+          ball.velocity.y += force[index].y / ball.mass * deltaTime;
+        } else {
+          // set 0
+          ball.velocity.x = 0;
+          ball.velocity.y = 0;
+        }
       })
 
     }
@@ -603,6 +675,7 @@ export default function GravitationPage() {
   }
 
   function canvasMouseDown(e) {
+    let mode = controlState.mode;
     setDragInfo({
       ...dragInfo,
       mouseKey: e.button,
@@ -610,19 +683,22 @@ export default function GravitationPage() {
       dragStart: { x: e.clientX, y: e.clientY },
       dragEnd: { x: e.clientX, y: e.clientY },
     })
-    if (controlState.mode === "create" && e.button === 2) { // mouse right button, delete the ball if mouse is inside
+    if (mode === "create" && e.button === 2) { // mouse right button, delete the ball if mouse is inside
       // remove highlighted ball is enough
       if (highlightedBallIndex !== null) {
         setBalls(balls.filter((ball, index) => index !== highlightedBallIndex))
         setHighlightedBallIndex(null);
       }
-    }
-    if (controlState.mode === "play" || controlState.mode === "pause") {
+    } else if (mode === "edit" && (e.button === 0 || e.button === 2)) {
       const foundIndex = findBallAtScreen({ x: e.clientX, y: e.clientY });
-      if (foundIndex !== null) {
+      if (foundIndex !== selectedBallIndex) {
         setSelectedBallIndex(foundIndex);
-      } else {
-        setSelectedBallIndex(null);
+        if (foundIndex !== null) {setTemporaryValueOnEdit(balls[foundIndex]);}
+      }
+    } else if (mode === "play" || controlState.mode === "pause") {
+      const foundIndex = findBallAtScreen({ x: e.clientX, y: e.clientY });
+      if (foundIndex !== selectedBallIndex) {
+        setSelectedBallIndex(foundIndex);
       }
     }
   }
@@ -651,6 +727,7 @@ export default function GravitationPage() {
   }
 
   function canvasMouseUp(e) {
+    let mode = controlState.mode;
     if (!dragInfo.isDragging) {return; }
     setDragInfo({
       ...dragInfo,
@@ -672,8 +749,45 @@ export default function GravitationPage() {
           mass: createBallMass(worldRadius),
           velocity: { x: 0, y: 0 },
           trace: [],
+          pinned: false,
         }
       ])
+    } else if (mode === "edit" && dragInfo.isDragging && selectedBallIndex !== null && (dragInfo.mouseKey === 0 || dragInfo.mouseKey === 2)) {
+      if (dragInfo.mouseKey === 0) {
+        // update position of the selected ball
+        const screenDx = dragInfo.dragEnd.x - dragInfo.dragStart.x;
+        const screenDy = dragInfo.dragEnd.y - dragInfo.dragStart.y;
+        const worldDx = pixelsToMeters(screenDx);
+        const worldDy = pixelsToMeters(screenDy);
+        setBalls(balls.map((ball, index) => {
+          if (index === selectedBallIndex) {
+            return {
+              ...ball,
+              center: {
+                x: ball.center.x + worldDx,
+                y: ball.center.y - worldDy,
+              }
+            }
+          }
+          return ball;
+        }));
+      } else if (dragInfo.mouseKey === 2) {
+        // update radius and possibly mass
+        const screenDragEnd = dragInfo.dragEnd;
+        const worldDragEnd = screenToWorld(screenDragEnd);
+        const newRadius = hypot(worldDragEnd.x - balls[selectedBallIndex].center.x, worldDragEnd.y - balls[selectedBallIndex].center.y);
+        let newMass = resetBallMass(balls[selectedBallIndex].radius, balls[selectedBallIndex].mass, newRadius);
+        setBalls(balls.map((ball, index) => {
+          if (index === selectedBallIndex) {
+            return {
+              ...ball,
+              radius: newRadius,
+              mass: newMass,
+            }
+          }
+          return ball;
+        }))
+      }
     } else if (dragInfo.mouseKey === 1 && centeredBallIndex === null) {
       // move camera center
       const dragDistance = {
@@ -690,21 +804,60 @@ export default function GravitationPage() {
     }
   }
 
+  function setTemporaryValueOnEdit(targetBall, cmfOverride = null) {
+    let cmf = controlState.createMassFormula;
+    if (cmfOverride !== null) { cmf = cmfOverride; }
+    let currentMassValue = 0;
+    // calculate mass value according to the formula
+    const ball = targetBall;
+    if (cmf === "volumeDensity") {
+      currentMassValue = ball.mass / (4 * Math.PI * ball.radius ** 3 / 3);
+    } else if (cmf === "areaDensity") {
+      currentMassValue = ball.mass / (Math.PI * ball.radius ** 2);
+    } else {
+      currentMassValue = ball.mass;
+    }
+    setTemporaryValue(currentMassValue.toFixed(3).toString());
+  }
+
   function canvasMouseWheel(e) {
     // don't scale if is dragging
     if (dragInfo.isDragging) { return; }
     const delta = e.deltaY;
     const factor = 1.1;
-    if (delta < 0) {
-      setControlState({
-        ...controlState,
-        pixelsPerMeter: controlState.pixelsPerMeter * factor,
-      })
+    let mode = controlState.mode;
+    if (mode == "edit" && (selectedBallIndex === null || highlightedBallIndex !== null)) {
+      let targetIndex = selectedBallIndex !== null ? selectedBallIndex : highlightedBallIndex;
+      // update mass
+      let newMass = balls[targetIndex].mass;
+      if (delta < 0) {
+        newMass *= factor;
+      } else {
+        newMass /= factor;
+      }
+      const newBalls = (balls.map((ball, index) => {
+        if (index === targetIndex) {
+          return {
+            ...ball,
+            mass: newMass,
+          }
+        }
+        return ball;
+      }))
+      setBalls(newBalls);
+      setTemporaryValueOnEdit(newBalls[targetIndex]);
     } else {
-      setControlState({
-        ...controlState,
-        pixelsPerMeter: controlState.pixelsPerMeter / factor,
-      })
+      if (delta < 0) {
+        setControlState({
+          ...controlState,
+          pixelsPerMeter: controlState.pixelsPerMeter * factor,
+        })
+      } else {
+        setControlState({
+          ...controlState,
+          pixelsPerMeter: controlState.pixelsPerMeter / factor,
+        })
+      }
     }
   }
 
@@ -767,7 +920,7 @@ export default function GravitationPage() {
         ) : (cmf === "areaDensity" ? (
           <span>kg/m<sup>2</sup></span>
         ) : "kg"),
-        "100%", 0, null, 0.1
+        "100%",
       )}
     </Stack>
   } else if (controlState.mode === "play" || controlState.mode === "pause") {
@@ -819,7 +972,7 @@ export default function GravitationPage() {
         <span>m<sup>{
           gf === "inverseSquare" ? "3" : (gf === "inverseLinear" ? "2" : "4")
         }</sup>/(kg·s<sup>2</sup>)</span>,
-        "100%", 0, null, 0.1
+        "100%",
       )}
       
       <Box width="100%">
@@ -858,7 +1011,7 @@ export default function GravitationPage() {
       </Box>
 
       {AlignedNumberInput(
-        <span>trace count</span>,
+        <span>trace length</span>,
         controlState.traceTicks, (e) => {
           setControlState({ ...controlState, traceTicks: e.target.value });
           let v = parseInt(e.target.value);
@@ -876,7 +1029,7 @@ export default function GravitationPage() {
           }
         },
         "ticks",
-        "100%", 0, null, 0.1
+        "100%",
       )}
       
       <FormControl fullWidth variant="standard" size="small">
@@ -893,9 +1046,91 @@ export default function GravitationPage() {
           <MenuItem value="all">all of'em</MenuItem>
         </Select>
       </FormControl>
-
+      
     </Stack>
 
+  } else if (controlState.mode === "edit") {
+    const cmf = controlState.createMassFormula;
+    subcontrolsPanel = <Stack direction="column" spacing={1}>
+      <Stack direction="column">
+        <BulletinText width="15rem">left/right click: select </BulletinText>
+        <BulletinText width="15rem">left-click and drag: move </BulletinText>
+        <BulletinText width="15rem">right-click and drag: resize </BulletinText>
+        <BulletinText width="15rem">wheel: change selected mass</BulletinText>
+      </Stack>
+      <FormControl fullWidth variant="standard" size="small">
+        <InputLabel id="create-mass-formula-label">resize mass</InputLabel>
+        <Select
+          labelId="create-mass-formula-label"
+          value={controlState.createMassFormula}
+          onChange={(e) => {
+            setControlState({ ...controlState, createMassFormula: e.target.value });
+            if (selectedBallIndex !== null) {
+              setTemporaryValueOnEdit(balls[selectedBallIndex], e.target.value);
+            }
+          }}
+        >
+          <MenuItem value="volumeDensity">
+            keep volume density
+          </MenuItem>
+          <MenuItem value="areaDensity">
+            keep area density
+          </MenuItem>
+          <MenuItem value="fixed">
+            keep fixed mass
+          </MenuItem>
+        </Select>
+      </FormControl>
+      {AlignedNumberInput(
+        cmf === "volumeDensity" ? <span>volume density <Italics>ρ</Italics></span> : (cmf === "areaDensity" ? <span>area density <Italics>ρ</Italics></span> : <span>mass <Italics>m</Italics></span>),
+        selectedBallIndex === null ? "select a ball" : temporaryValue,
+        (e) => {
+          setTemporaryValue(e.target.value);
+          if (selectedBallIndex !== null) {
+            let newMass = calculateMass(balls[selectedBallIndex].radius, e.target.value, cmf);
+            setBalls(balls.map((ball, index) => {
+              if (index === selectedBallIndex) {
+                return {
+                  ...ball,
+                  mass: newMass,
+                }
+              }
+              return ball;
+            }))
+          }
+        },
+        cmf === "volumeDensity" ? (
+          <span>kg/m<sup>3</sup></span>
+        ) : (cmf === "areaDensity" ? (
+          <span>kg/m<sup>2</sup></span>
+        ) : "kg"),
+        "100%",
+        selectedBallIndex === null
+      )}
+      
+      <CButton 
+        variant={(selectedBallIndex !== null && balls[selectedBallIndex].pinned) ? "contained" : "outlined"}
+        disabled={selectedBallIndex === null}
+        color="blue"
+        sx={{ width: "100%" }}
+        onClick={() => {
+          if (selectedBallIndex !== null) {
+            setBalls(balls.map((ball, index) => {
+              if (index === selectedBallIndex) {
+                return {
+                  ...ball,
+                  pinned: !ball.pinned,
+                }
+              }
+              return ball;
+            }))
+          }
+        }}
+      >
+        pin position
+      </CButton>
+
+    </Stack>
   }
   
   let ballInfoPanel = null;
@@ -909,6 +1144,7 @@ export default function GravitationPage() {
     let y = 0;
     let velocity = { x: 0, y: 0 };
     let force = null;
+    let pinned = false;
     if (controlState.mode === "create" && dragInfo.isDragging && dragInfo.mouseKey === 0) { // is creating a ball
       let screenRadius = hypot(dragInfo.dragEnd.x - dragInfo.dragStart.x, dragInfo.dragEnd.y - dragInfo.dragStart.y);
       worldRadius = pixelsToMeters(screenRadius);
@@ -919,7 +1155,39 @@ export default function GravitationPage() {
       velocity = { x: 0, y: 0 };
       hasBall = true;
     } else if (selectedBallIndex !== null) {
-      hasBallIndex = selectedBallIndex;
+      if (controlState.mode === "edit" && dragInfo.isDragging) {
+        if (dragInfo.mouseKey === 0) {
+          ballIndex = selectedBallIndex.toString();
+          worldRadius = balls[selectedBallIndex].radius;
+          mass = balls[selectedBallIndex].mass;
+          x = balls[selectedBallIndex].center.x + pixelsToMeters(dragInfo.dragEnd.x - dragInfo.dragStart.x);
+          y = balls[selectedBallIndex].center.y - pixelsToMeters(dragInfo.dragEnd.y - dragInfo.dragStart.y);
+          velocity = balls[selectedBallIndex].velocity;
+          const temporaryBall = {...balls[selectedBallIndex]};
+          temporaryBall.center = { x, y };
+          force = calculateForce(temporaryBall, balls, selectedBallIndex);
+          pinned = temporaryBall.pinned;
+          hasBall = true;
+        } else if (dragInfo.mouseKey === 2) {
+          ballIndex = selectedBallIndex.toString();
+          worldRadius = hypot(
+            balls[selectedBallIndex].center.x - screenToWorld(dragInfo.dragEnd).x,
+            balls[selectedBallIndex].center.y - screenToWorld(dragInfo.dragEnd).y
+          );
+          mass = resetBallMass(balls[selectedBallIndex].radius, balls[selectedBallIndex].mass, worldRadius);
+          x = balls[selectedBallIndex].center.x;
+          y = balls[selectedBallIndex].center.y;
+          velocity = balls[selectedBallIndex].velocity;
+          const temporaryBall = {...balls[selectedBallIndex]};
+          temporaryBall.radius = worldRadius;
+          temporaryBall.mass = mass;
+          force = calculateForce(temporaryBall, balls, selectedBallIndex);
+          pinned = temporaryBall.pinned;
+          hasBall = true;
+        }
+      } else {
+        hasBallIndex = selectedBallIndex;
+      }
     } else if (highlightedBallIndex !== null) {
       hasBallIndex = highlightedBallIndex;
     }
@@ -931,7 +1199,8 @@ export default function GravitationPage() {
       x = ball.center.x;
       y = ball.center.y;
       velocity = ball.velocity;
-      force = calculateForce(balls, hasBallIndex);
+      force = calculateForce(ball, balls, hasBallIndex);
+      pinned = ball.pinned;
       hasBall = true;
     }
     if (hasBall) {
@@ -941,7 +1210,7 @@ export default function GravitationPage() {
         )}
         {AlignedTextPair(<Italics>Center:</Italics>, 
           <span>
-            ({ScientificNumberText(x, null)}, {ScientificNumberText(y, null)}) m
+            {pinned && "pinned"} ({ScientificNumberText(x, null)}, {ScientificNumberText(y, null)}) m
           </span>
         )}
         {AlignedTextPair(<Italics>Radius:</Italics>,
