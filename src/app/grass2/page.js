@@ -40,7 +40,7 @@ export default function GrassPage() {
   const [renderInterval, setRenderInterval] = useState(null)
   const [globalNoises, setGlobalNoises] = useState({})
   const [settings, rawSetSettings] = useState({
-    startTime: Date.now(),
+    startTime: 0,
     gridInterval: 40,                                          // q w
     lineWidth: 20,                                             // e r
     displacementRatio: 3,                                      // t y
@@ -98,7 +98,7 @@ export default function GrassPage() {
     const offsetY = clientSize.height / 2;
     const offset = new Vector(offsetX, offsetY);
     
-    const basicHue = globalNoises.hue.simplex3(0, 0, settings.startTime) * 180 + 180;
+    const basicHue = (settings.startTime - Math.floor(settings.startTime)) * 360;
     const basicSat = settings.basicSaturation;
     const rangeSat = settings.rangeSaturation;
     const {
@@ -283,7 +283,13 @@ export default function GrassPage() {
     hueRange: 30,
     */
     if (keyIs(e, "z")) {
-      recreatePoints(clientSize, G.current.settings)
+      // reset startTime
+      const newSettings = {
+        ...settings,
+        startTime: Date.now() / 1000
+      }
+      recreatePoints(clientSize, newSettings);
+      setSettings(newSettings);
     } else if (keyIs(e, "x")) {
       const drawHeadTypes = ["always", "never", "tooshort"];
       const i = drawHeadTypes.indexOf(settings.drawHeadType);
@@ -392,15 +398,20 @@ export default function GrassPage() {
     // load cookies
     const cookies = document.cookie.split(";").map((x) => x.trim());
     const settingsCookie = cookies.find((x) => x.startsWith("grass_settings="));
-    let newSettings = settings;
+    let newSettings = {
+      ...settings,
+      startTime: Date.now() / 1000
+    }
     if (settingsCookie != null) {
       const settingsStr = settingsCookie.split("=")[1];
       const loaded = JSON.parse(settingsStr);
       newSettings = {
         ...settings,
         ...loaded,
-        startTime: Date.now()
+        startTime: Date.now() / 1000
       }
+      setSettings(newSettings);
+    } else {
       setSettings(newSettings);
     }
     const u = () => {
