@@ -51,6 +51,7 @@ class Color {
     }
 
     static fromHSV(h, s, v) {
+        h = ((h % 360) + 360) % 360;
         const c = v * s;
         const x = c * (1 - Math.abs((h / 60) % 2 - 1));
         const m = v - c;
@@ -86,6 +87,83 @@ class Color {
         return new Color(r, g, b);
     }
 
+    interpolate(other, t) {
+        const r = this.r + (other.r - this.r) * t;
+        const g = this.g + (other.g - this.g) * t;
+        const b = this.b + (other.b - this.b) * t;
+        const a = this.a + (other.a - this.a) * t;
+        return new Color(r, g, b, a);
+    }
+
 }
 
-export { Color };
+class Vector2d {
+
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    clone() {
+        return new Vector2d(this.x, this.y);
+    }
+
+    add(v) {
+        return new Vector2d(this.x + v.x, this.y + v.y);
+    }
+
+    sub(v) {
+        return new Vector2d(this.x - v.x, this.y - v.y);
+    }
+
+    mul(s) {
+        return new Vector2d(this.x * s, this.y * s);
+    }
+
+    div(s) {
+        return new Vector2d(this.x / s, this.y / s);
+    }
+
+    dot(v) {
+        return this.x * v.x + this.y * v.y;
+    }
+
+    cross(v) {
+        return this.x * v.y - this.y * v.x;
+    }
+
+    length() {
+        return Math.sqrt(this.x * this.x + this.y * this.y);
+    }
+
+    normalized() {
+        const len = this.length();
+        if (len === 0) {
+            return new Vector2d(0, 0);
+        }
+        return new Vector2d(this.x / len, this.y / len);
+    }
+
+    normalize() {
+        const len = this.length();
+        this.x /= len;
+        this.y /= len;
+    }
+
+    rotate(angle) {
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        return new Vector2d(this.x * cos - this.y * sin, this.x * sin + this.y * cos);
+    }
+
+    angle() {
+        return Math.atan2(this.y, this.x);
+    }
+
+    lerp(other, t) {
+        return new Vector2d(this.x + (other.x - this.x) * t, this.y + (other.y - this.y) * t);
+    }
+
+}
+
+export { Color, Vector2d };

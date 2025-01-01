@@ -5,7 +5,6 @@ import {
   FormControl, InputLabel, Select, MenuItem, OutlinedInput, InputAdornment, Input, FormHelperText, Grid2,
   List, ListItem, ListItemText, IconButton
 } from "@mui/material"
-import Head from "next/head"
 import { Delete as DeleteIcon } from "@mui/icons-material"
 import { useState, useEffect, useRef } from "react"
 import { createTheme } from "@mui/material/styles"
