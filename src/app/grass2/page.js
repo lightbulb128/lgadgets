@@ -61,7 +61,7 @@ export default function GrassPage() {
   function setSettings(newSettings) {
     // record into cookies
     const newSettingsStr = JSON.stringify(newSettings);
-    document.cookie = `settings=${newSettingsStr};expires=Fri, 31 Dec 9999 23:59:59 GMT`;
+    document.cookie = `grass_settings=${newSettingsStr};expires=Fri, 31 Dec 9999 23:59:59 GMT`;
     rawSetSettings(newSettings)
   }
   const canvasRef = useRef(null)
@@ -382,7 +382,7 @@ export default function GrassPage() {
       setSettings(newSettings)
     } else if (keyIs(e, "v")) {
       // clear cookies
-      document.cookie = "settings=;expires=Thu, 01 Jan 1970 00:00:00 GMT";
+      document.cookie = "grass_settings=;expires=Thu, 01 Jan 1970 00:00:00 GMT";
       // refresh
       window.location.reload()
     }
@@ -391,7 +391,7 @@ export default function GrassPage() {
   useEffect(() => {
     // load cookies
     const cookies = document.cookie.split(";").map((x) => x.trim());
-    const settingsCookie = cookies.find((x) => x.startsWith("settings="));
+    const settingsCookie = cookies.find((x) => x.startsWith("grass_settings="));
     let newSettings = settings;
     if (settingsCookie != null) {
       const settingsStr = settingsCookie.split("=")[1];
