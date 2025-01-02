@@ -3,8 +3,7 @@
 import { useState, useEffect, useRef } from "react"
 import { 
   Box, Paper, Stack, Divider, Button, TextField, ThemeProvider, Typography,
-  FormControl, InputLabel, Select, MenuItem, OutlinedInput, InputAdornment, Input, FormHelperText, Grid2,
-  List, ListItem, ListItemText, IconButton
+  Grid2, Backdrop, Container
 } from "@mui/material"
 import { createTheme } from "@mui/material/styles"
 import { Color, Vector2d as Vector } from "../utils"
@@ -14,6 +13,17 @@ const fps = 24;
 
 function keyIs(e, char) {
   return e.key == char || e.key == char.toUpperCase();
+}
+
+function GridItem({ children, size, monospace, ...props }) {
+  return <Grid2 size={size} {...props}>
+    <Typography variant="body1"
+      sx={{
+        fontFamily: monospace ? "monospace" : "inherit",
+        whiteSpace: "nowrap"
+      }}
+    >{children}</Typography>
+  </Grid2>
 }
 
 export default function GrassPage() {
@@ -39,6 +49,7 @@ export default function GrassPage() {
   const [points, setPoints] = useState([])
   const [renderInterval, setRenderInterval] = useState(null)
   const [globalNoises, setGlobalNoises] = useState({})
+  const [showHelp, setShowHelp] = useState(false)
   const [settings, rawSetSettings] = useState({
     startTime: 0,
     gridInterval: 40,                                          // q w
@@ -74,6 +85,7 @@ export default function GrassPage() {
       settings,
       canvasRef,
       globalNoises,
+      showHelp
     }
   })
   
@@ -270,7 +282,7 @@ export default function GrassPage() {
   }
 
   function userKeyPress(e) {
-    const { clientSize, settings } = G.current;
+    const { clientSize, settings, showHelp } = G.current;
     /*
     gridInterval: 40,
     lineWidth: 10,
@@ -391,6 +403,9 @@ export default function GrassPage() {
       document.cookie = "grass_settings=;expires=Thu, 01 Jan 1970 00:00:00 GMT";
       // refresh
       window.location.reload()
+    } else if (keyIs(e, " ")) {
+      console.log("space", showHelp)
+      setShowHelp(!showHelp)
     }
   }
   
@@ -453,21 +468,87 @@ export default function GrassPage() {
       width: "100%",
       height: "100vh",
       backgroundColor: "darkgray",
-      display: "flex",
+      display: "flex"
     }}>
-      <Box sx={{
-        position: "absolute"
-      }} padding={1}>
-        <Stack direction="column" spacing={1}>
-        </Stack>
-      </Box>
       <canvas width={clientSize.width} height={clientSize.height} ref={canvasRef} 
-        // onMouseDown={canvasMouseDown}
-        // onMouseMove={canvasMouseMove}
-        // onMouseUp={canvasMouseUp}
-        // onWheel={canvasMouseWheel}
+        onClick={() => setShowHelp(!showHelp)}
       />
     </Box>
+    <Backdrop open={showHelp} sx={{zIndex: 1000}} onClick={() => setShowHelp(false)}>
+      <Paper
+        sx={{
+          // backgroundColor: "rgba(20, 20, 20, 0.8)",
+          minWidth: 500,
+          maxWidth: 800,
+          width: "50%",
+        }}
+      ><Box padding={2}>
+        <Grid2 container spacing={1}>
+
+          <GridItem size={3} monospace>[space]</GridItem>
+          <GridItem size={9}>open / close this help.</GridItem>
+
+          <GridItem size={3} monospace>[q] [w]</GridItem>
+          <GridItem size={7}>adjust grid interval.</GridItem>
+          <GridItem size={2}>({settings.gridInterval.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[e] [r]</GridItem>
+          <GridItem size={7}>adjust line width.</GridItem>
+          <GridItem size={2}>({settings.lineWidth.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[t] [y]</GridItem>
+          <GridItem size={7}>adjust displacement ratio.</GridItem>
+          <GridItem size={2}>({settings.displacementRatio.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[u] [i]</GridItem>
+          <GridItem size={7}>adjust basic saturation.</GridItem>
+          <GridItem size={2}>({settings.basicSaturation.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[o] [p]</GridItem>
+          <GridItem size={7}>adjust range saturation.</GridItem>
+          <GridItem size={2}>({settings.rangeSaturation.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[a] [s]</GridItem>
+          <GridItem size={7}>adjust coordinate noise density.</GridItem>
+          <GridItem size={2}>({settings.coordinateNoiseDensity.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[d] [f]</GridItem>
+          <GridItem size={7}>adjust hue noise density.</GridItem>
+          <GridItem size={2}>({settings.hueNoiseDensity.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[g] [h]</GridItem>
+          <GridItem size={7}>adjust saturation noise density.</GridItem>
+          <GridItem size={2}>({settings.saturationNoiseDensity.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[j] [k]</GridItem>
+          <GridItem size={7}>adjust hue range.</GridItem>
+          <GridItem size={2}>({settings.hueRange.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[l] [;]</GridItem>
+          <GridItem size={7}>adjust time scale.</GridItem>
+          <GridItem size={2}>({settings.timeScale.toFixed(2)})</GridItem>
+
+          <GridItem size={3} monospace>[c]</GridItem>
+          <GridItem size={7}>change grid type.</GridItem>
+          <GridItem size={2}>({settings.gridType})</GridItem>
+
+          <GridItem size={3} monospace>[n] [m]</GridItem>
+          <GridItem size={7}>rotate grid.</GridItem>
+          <GridItem size={2}>({(settings.gridRotation / Math.PI * 180).toFixed(0)} deg)</GridItem>
+
+          <GridItem size={3} monospace>[x]</GridItem>
+          <GridItem size={7}>toggle draw head type.</GridItem>
+          <GridItem size={2}>({settings.drawHeadType})</GridItem>
+
+          <GridItem size={3} monospace>[z]</GridItem>
+          <GridItem size={9}>reinitialize points.</GridItem>
+
+          <GridItem size={3} monospace>[v]</GridItem>
+          <GridItem size={9}>reset, clear cookies and refresh.</GridItem>
+
+        </Grid2>
+      </Box></Paper>
+    </Backdrop>
   </ThemeProvider>
   </>
 
